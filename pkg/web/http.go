@@ -10,16 +10,31 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"strconv"
 
+	"github.com/OpenSlides/openslides-autoupdate-service/pkg/auth"
 	"github.com/OpenSlides/openslides-search-service/pkg/config"
 	"github.com/OpenSlides/openslides-search-service/pkg/search"
 )
 
 type controller struct {
-	cfg *config.Config
-	qs  *search.QueryServer
+	cfg  *config.Config
+	auth *auth.Auth
+	qs   *search.QueryServer
 }
+
+/*
+func userIDFromRequest(r *http.Request) (int, error) {
+	user := r.FormValue("u")
+	if user == "" {
+		return 0, errors.New("'u' parameter missing")
+	}
+	userID, err := strconv.Atoi(user)
+	if err != nil {
+		return 0, errors.New("'u' is not an user id")
+	}
+	return userID, nil
+}
+*/
 
 func (c *controller) search(w http.ResponseWriter, r *http.Request) {
 
@@ -38,17 +53,15 @@ func (c *controller) search(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if c.cfg.Restricter.URL != "" {
-		// TODO: Use auth
-		user := r.FormValue("u")
-		if user == "" {
-			http.Error(w, "'u' parameter missing", http.StatusBadRequest)
-			return
-		}
-		userID, err := strconv.Atoi(user)
-		if err != nil {
-			http.Error(w, "'u' is not an user id", http.StatusBadRequest)
-			return
-		}
+
+		userID := c.auth.FromContext(r.Context())
+		/*
+			userID, err := userIDFromRequest(r)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		*/
 
 		requestBody := struct {
 			UserID int      `json:"user_id"`
@@ -100,11 +113,17 @@ func (c *controller) search(w http.ResponseWriter, r *http.Request) {
 }
 
 // Run starts the web server and routes the incoming requests to the controller.
-func Run(ctx context.Context, cfg *config.Config, qs *search.QueryServer) error {
+func Run(
+	ctx context.Context,
+	cfg *config.Config,
+	auth *auth.Auth,
+	qs *search.QueryServer,
+) error {
 
 	c := controller{
-		cfg: cfg,
-		qs:  qs,
+		cfg:  cfg,
+		auth: auth,
+		qs:   qs,
 	}
 
 	mux := http.NewServeMux()

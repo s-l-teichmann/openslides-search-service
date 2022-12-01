@@ -10,8 +10,12 @@ import (
 	"os/signal"
 	"runtime"
 
+	"github.com/OpenSlides/openslides-autoupdate-service/pkg/auth"
+	"github.com/OpenSlides/openslides-autoupdate-service/pkg/environment"
+	"github.com/OpenSlides/openslides-autoupdate-service/pkg/redis"
 	"github.com/OpenSlides/openslides-search-service/pkg/config"
 	"github.com/OpenSlides/openslides-search-service/pkg/meta"
+	"github.com/OpenSlides/openslides-search-service/pkg/oserror"
 	"github.com/OpenSlides/openslides-search-service/pkg/search"
 	"github.com/OpenSlides/openslides-search-service/pkg/web"
 	"golang.org/x/sys/unix"
@@ -73,7 +77,15 @@ func run(cfg *config.Config) error {
 	}
 	go qs.Run(ctx)
 
-	return web.Run(ctx, cfg, qs)
+	lookup := new(environment.ForProduction)
+	// Redis as message bus for datastore and logout events.
+	messageBus := redis.New(lookup)
+	// Auth Service.
+	authService, authBackground := auth.New(lookup, messageBus)
+
+	go authBackground(ctx, oserror.Handle)
+
+	return web.Run(ctx, cfg, authService, qs)
 }
 
 func main() {
