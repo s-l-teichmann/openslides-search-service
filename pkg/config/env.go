@@ -29,6 +29,12 @@ func storeInt(dst *int) func(string) error {
 // storeDuration returns a function to store a duration.
 func storeDuration(dst *time.Duration) func(string) error {
 	return func(v string) error {
+		// If it can be parsed as an integer take that as seconds.
+		secs, err := strconv.Atoi(v)
+		if err == nil {
+			*dst = time.Second * time.Duration(secs)
+			return nil
+		}
 		x, err := time.ParseDuration(v)
 		if err == nil {
 			*dst = x
