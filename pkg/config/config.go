@@ -1,7 +1,10 @@
 // Package config implements the configuration of the search service.
 package config
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // Default configuration.
 const (
@@ -109,4 +112,14 @@ func (cfg *Config) fromEnv() error {
 		{"OPENSLIDES_DB_HOST", storeString(&cfg.Database.Host)},
 		{"OPENSLIDES_DB_PORT", storeInt(&cfg.Database.Port)},
 	})
+}
+
+// ConnectionURL returns a connection URL.
+func (db *Database) ConnectionURL() string {
+	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s",
+		db.User,
+		db.Password,
+		db.Host,
+		db.Port,
+		db.Database)
 }
