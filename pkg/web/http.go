@@ -5,14 +5,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"strings"
+	"syscall"
 
 	"github.com/OpenSlides/openslides-autoupdate-service/pkg/auth"
 	"github.com/OpenSlides/openslides-search-service/pkg/config"
+	"github.com/OpenSlides/openslides-search-service/pkg/oserror"
 	"github.com/OpenSlides/openslides-search-service/pkg/search"
 )
 
@@ -40,15 +44,15 @@ func (c *controller) search(w http.ResponseWriter, r *http.Request) {
 
 	query := r.FormValue("q")
 	if query == "" {
-		http.Error(w, "'q' parameter missing", http.StatusBadRequest)
+		handleErrorWithStatus(w,
+			invalidRequestError{
+				errors.New("'q' parameter missing")})
 		return
 	}
 
 	answers, err := c.qs.Query(query)
 	if err != nil {
-		log.Printf("error: %v\n", err)
-		http.Error(w, "Something went wrong. Check the server logs.",
-			http.StatusInternalServerError)
+		handleErrorWithStatus(w, err)
 		return
 	}
 
@@ -58,7 +62,7 @@ func (c *controller) search(w http.ResponseWriter, r *http.Request) {
 		/*
 			userID, err := userIDFromRequest(r)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
+				handleErrorWithStatus(w, err)
 				return
 			}
 		*/
@@ -73,9 +77,7 @@ func (c *controller) search(w http.ResponseWriter, r *http.Request) {
 
 		body, err := json.Marshal(&requestBody)
 		if err != nil {
-			log.Printf("error: %v\n", err)
-			http.Error(w, "Something went wrong. Check the server logs.",
-				http.StatusInternalServerError)
+			handleErrorWithStatus(w, err)
 			return
 		}
 		resp, err := http.Post(
@@ -83,16 +85,14 @@ func (c *controller) search(w http.ResponseWriter, r *http.Request) {
 			"application/json",
 			bytes.NewReader(body))
 		if err != nil {
-			log.Printf("error: restricter call failed: %v\n", err)
-			http.Error(w, "Something went wrong. Check the server logs.",
-				http.StatusInternalServerError)
+			handleErrorWithStatus(w, err)
 			return
 		}
 		if resp.StatusCode != http.StatusOK {
-			log.Printf("error: restricter call failed: %q (%d)\n",
-				resp.Status, resp.StatusCode)
-			http.Error(w, "Something went wrong. Check the server logs.",
-				http.StatusInternalServerError)
+			handleErrorWithStatus(w,
+				invalidRequestError{
+					fmt.Errorf("restricter call failed: %q (%d)",
+						resp.Status, resp.StatusCode)})
 			return
 		}
 		defer resp.Body.Close()
@@ -112,6 +112,96 @@ func (c *controller) search(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func authMiddleware(next http.Handler, auth *auth.Auth) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, err := auth.Authenticate(w, r)
+		if err != nil {
+			handleErrorWithStatus(w, fmt.Errorf("authenticate request: %w", err))
+			return
+		}
+
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+type invalidRequestError struct {
+	err error
+}
+
+func (e invalidRequestError) Error() string {
+	return fmt.Sprintf("Invalid request: %v", e.err)
+}
+
+func (e invalidRequestError) Type() string {
+	return "invalid_request"
+}
+
+func handleErrorWithStatus(w http.ResponseWriter, err error) {
+	handleError(w, err, true, false)
+}
+
+// ClientError is an expected error that are returned to the client.
+type ClientError interface {
+	Type() string
+	Error() string
+}
+
+// handleError interprets the given error and writes a corresponding message to
+// the client and/or stdout.
+//
+// Do not use this function directly but use handleErrorWithStatus,
+// handleErrorWithoutStatus or handleErrorInternal.
+//
+// If the handler already started to write the body then it is not allowed to
+// set the http-status-code. In this case, writeStatusCode has to be fales.
+func handleError(w http.ResponseWriter, err error, writeStatusCode bool, internal bool) {
+	if writeStatusCode {
+		w.Header().Set("Content-Type", "application/octet-stream")
+	}
+
+	if oserror.ContextDone(err) ||
+		errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, syscall.ECONNRESET) {
+		// Client closed connection.
+		return
+	}
+
+	status := http.StatusBadRequest
+	var StatusCoder interface{ StatusCode() int }
+	if errors.As(err, &StatusCoder) {
+		status = StatusCoder.StatusCode()
+	}
+
+	var errClient ClientError
+	if errors.As(err, &errClient) {
+		if writeStatusCode {
+			w.WriteHeader(status)
+		}
+
+		fmt.Fprintf(w, `{"error": {"type": "%s", "msg": "%s"}}`,
+			errClient.Type(), quote(errClient.Error()))
+		return
+	}
+
+	if writeStatusCode {
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+
+	clientOutput := `{"error": {"type": "InternalError", "msg": "Something went wrong on the server. The admin is already informed."}}`
+	if internal {
+		clientOutput = err.Error()
+	}
+
+	oserror.Handle(err)
+	fmt.Fprintln(w, clientOutput)
+}
+
+// quote decodes changes quotation marks with a backslash to make sure, they are
+// valid json.
+func quote(s string) string {
+	return strings.ReplaceAll(s, `"`, `\"`)
+}
+
 // Run starts the web server and routes the incoming requests to the controller.
 func Run(
 	ctx context.Context,
@@ -128,7 +218,9 @@ func Run(
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/search", c.search)
+	mux.Handle(
+		"/search",
+		authMiddleware(http.HandlerFunc(c.search), auth))
 
 	addr := fmt.Sprintf("%s:%d", cfg.Web.Host, cfg.Web.Port)
 	log.Printf("listen web on %s\n", addr)
