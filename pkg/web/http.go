@@ -2,18 +2,23 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 
+	"github.com/OpenSlides/openslides-search-service/pkg/config"
 	"github.com/OpenSlides/openslides-search-service/pkg/search"
 )
 
 type controller struct {
-	qs *search.QueryServer
+	cfg *config.Config
+	qs  *search.QueryServer
 }
 
 func (c *controller) search(w http.ResponseWriter, r *http.Request) {
@@ -27,9 +32,66 @@ func (c *controller) search(w http.ResponseWriter, r *http.Request) {
 	answers, err := c.qs.Query(query)
 	if err != nil {
 		log.Printf("error: %v\n", err)
-		http.Error(w, "Some went wrong. Check the server logs.", http.StatusInternalServerError)
+		http.Error(w, "Something went wrong. Check the server logs.",
+			http.StatusInternalServerError)
 		return
 	}
+
+	if c.cfg.Restricter.URL != "" {
+		// TODO: Use auth
+		user := r.FormValue("u")
+		if user == "" {
+			http.Error(w, "'u' parameter missing", http.StatusBadRequest)
+			return
+		}
+		userID, err := strconv.Atoi(user)
+		if err != nil {
+			http.Error(w, "'u' is not an user id", http.StatusBadRequest)
+			return
+		}
+
+		requestBody := struct {
+			UserID int      `json:"user_id"`
+			FQIDs  []string `json:"fqids"`
+		}{
+			UserID: userID,
+			FQIDs:  answers,
+		}
+
+		body, err := json.Marshal(&requestBody)
+		if err != nil {
+			log.Printf("error: %v\n", err)
+			http.Error(w, "Something went wrong. Check the server logs.",
+				http.StatusInternalServerError)
+			return
+		}
+		resp, err := http.Post(
+			c.cfg.Restricter.URL,
+			"application/json",
+			bytes.NewReader(body))
+		if err != nil {
+			log.Printf("error: restricter call failed: %v\n", err)
+			http.Error(w, "Something went wrong. Check the server logs.",
+				http.StatusInternalServerError)
+			return
+		}
+		if resp.StatusCode != http.StatusOK {
+			log.Printf("error: restricter call failed: %q (%d)\n",
+				resp.Status, resp.StatusCode)
+			http.Error(w, "Something went wrong. Check the server logs.",
+				http.StatusInternalServerError)
+			return
+		}
+		defer resp.Body.Close()
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := io.Copy(w, resp.Body); err != nil {
+			log.Printf("error: copy restricter output failed: %v\n", err)
+		}
+		return
+	}
+
+	// No restricter configured.
+
 	w.Header().Set("Content-Type", "application/json")
 
 	if err := json.NewEncoder(w).Encode(answers); err != nil {
@@ -38,13 +100,19 @@ func (c *controller) search(w http.ResponseWriter, r *http.Request) {
 }
 
 // Run starts the web server and routes the incoming requests to the controller.
-func Run(ctx context.Context, addr string, qs *search.QueryServer) error {
+func Run(ctx context.Context, cfg *config.Config, qs *search.QueryServer) error {
 
-	c := controller{qs: qs}
+	c := controller{
+		cfg: cfg,
+		qs:  qs,
+	}
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/search", c.search)
+
+	addr := fmt.Sprintf("%s:%d", cfg.Web.Host, cfg.Web.Port)
+	log.Printf("listen web on %s\n", addr)
 
 	s := &http.Server{
 		Addr:        addr,

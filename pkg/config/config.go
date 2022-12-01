@@ -8,20 +8,21 @@ import (
 
 // Default configuration.
 const (
-	DefaultWebPort     = 9050
-	DefaultWebHost     = ""
-	DefaultMaxQueue    = 5
-	DefaultIndexAge    = 100 * time.Millisecond
-	DefaultIndexFile   = "search.bleve"
-	DefaultIndexUpdate = 2 * time.Minute
-	DefaultIndexBatch  = 4096
-	DefaultModels      = "models.yml"
-	DefaultSearch      = "search.yml"
-	DefaultDB          = "openslides"
-	DefaultDBUser      = "openslides"
-	DefaultDBPassword  = "openslides"
-	DefaultDBHost      = "localhost"
-	DefaultDBPort      = 5432
+	DefaultWebPort       = 9050
+	DefaultWebHost       = ""
+	DefaultMaxQueue      = 5
+	DefaultIndexAge      = 100 * time.Millisecond
+	DefaultIndexFile     = "search.bleve"
+	DefaultIndexUpdate   = 2 * time.Minute
+	DefaultIndexBatch    = 4096
+	DefaultModels        = "models.yml"
+	DefaultSearch        = "search.yml"
+	DefaultDB            = "openslides"
+	DefaultDBUser        = "openslides"
+	DefaultDBPassword    = "openslides"
+	DefaultDBHost        = "localhost"
+	DefaultDBPort        = 5432
+	DefaultRestricterURL = ""
 )
 
 // Web are the parameters for the web server.
@@ -57,10 +58,16 @@ type Database struct {
 
 // Config is the configuration of the search service.
 type Config struct {
-	Web      Web
-	Index    Index
-	Models   Models
-	Database Database
+	Web        Web
+	Index      Index
+	Models     Models
+	Database   Database
+	Restricter Restricter
+}
+
+// Restricter is the URL of the restricter to filter content by user id.
+type Restricter struct {
+	URL string
 }
 
 // GetConfig returns the configuration overwritten with env vars.
@@ -87,6 +94,9 @@ func GetConfig() (*Config, error) {
 			Host:     DefaultDBHost,
 			Port:     DefaultDBPort,
 		},
+		Restricter: Restricter{
+			URL: DefaultRestricterURL,
+		},
 	}
 	if err := cfg.fromEnv(); err != nil {
 		return nil, err
@@ -111,6 +121,7 @@ func (cfg *Config) fromEnv() error {
 		{"OPENSLIDES_DB_PASSWORD", storeString(&cfg.Database.Password)},
 		{"OPENSLIDES_DB_HOST", storeString(&cfg.Database.Host)},
 		{"OPENSLIDES_DB_PORT", storeInt(&cfg.Database.Port)},
+		{"OPENSLIDES_RESTRICTER", storeString(&cfg.Restricter.URL)},
 	})
 }
 

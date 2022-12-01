@@ -73,9 +73,7 @@ func run(cfg *config.Config) error {
 	}
 	go qs.Run(ctx)
 
-	addr := fmt.Sprintf("%s:%d", cfg.Web.Host, cfg.Web.Port)
-	log.Printf("listen web on %s\n", addr)
-	return web.Run(ctx, addr, qs)
+	return web.Run(ctx, cfg, qs)
 }
 
 func main() {
