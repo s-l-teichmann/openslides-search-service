@@ -4,6 +4,7 @@ The OpenSlides search service.
 
 ## Configuration:
 
+
 | Env variable                    | Default value              | Meaning |
 | ------------------------------- | -------------------------- | ------- |
 | `SECRETS_PATH`                  | `/run/secrets`             | Path where the screts are stored. |
@@ -22,4 +23,3 @@ The OpenSlides search service.
 | `OPENSLIDES_DB_HOST`            | `localhost`                | Host of the database. |
 | `OPENSLIDES_DB_PORT`            | `5432`                     | Port of the database. |
 | `OPENSLIDES_RESTRICTER`         | ``                         | URL to use the restricter from the auto-update-service to filter the query results.|
-
