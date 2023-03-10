@@ -7,6 +7,7 @@ package config
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -23,7 +24,8 @@ const (
 	DefaultSearch        = "search.yml"
 	DefaultDB            = "openslides"
 	DefaultDBUser        = "openslides"
-	DefaultDBPassword    = "openslides"
+	DefaultSecretsPath   = "/run/secrets"
+	DefaultDBPassword    = "secret:postgres_password"
 	DefaultDBHost        = "localhost"
 	DefaultDBPort        = 5432
 	DefaultRestricterURL = ""
@@ -62,11 +64,12 @@ type Database struct {
 
 // Config is the configuration of the search service.
 type Config struct {
-	Web        Web
-	Index      Index
-	Models     Models
-	Database   Database
-	Restricter Restricter
+	SecretsPath string
+	Web         Web
+	Index       Index
+	Models      Models
+	Database    Database
+	Restricter  Restricter
 }
 
 // Restricter is the URL of the restricter to filter content by user id.
@@ -77,6 +80,7 @@ type Restricter struct {
 // GetConfig returns the configuration overwritten with env vars.
 func GetConfig() (*Config, error) {
 	cfg := &Config{
+		SecretsPath: DefaultSecretsPath,
 		Web: Web{
 			Port: DefaultWebPort,
 			Host: DefaultWebHost,
@@ -110,7 +114,14 @@ func GetConfig() (*Config, error) {
 
 // fromEnv fills the config from env vars.
 func (cfg *Config) fromEnv() error {
+	var (
+		storeString   = store(noparse)
+		storeInt      = store(strconv.Atoi)
+		storeDuration = store(parseDuration)
+		storeSecret   = store(parseSecrets(&cfg.SecretsPath))
+	)
 	return storeFromEnv([]storeEnv{
+		{"SECRETS_PATH", storeString(&cfg.SecretsPath)},
 		{"OPENSLIDES_SEARCH_PORT", storeInt(&cfg.Web.Port)},
 		{"OPENSLIDES_SEARCH_HOST", storeString(&cfg.Web.Host)},
 		{"OPENSLIDES_SEARCH_MAX_QUEUED", storeInt(&cfg.Web.MaxQueue)},
@@ -122,7 +133,7 @@ func (cfg *Config) fromEnv() error {
 		{"OPENSLIDES_SEARCH_YML", storeString(&cfg.Models.Search)},
 		{"OPENSLIDES_DB", storeString(&cfg.Database.Database)},
 		{"OPENSLIDES_DB_USER", storeString(&cfg.Database.User)},
-		{"OPENSLIDES_DB_PASSWORD", storeString(&cfg.Database.Password)},
+		{"OPENSLIDES_DB_PASSWORD", storeSecret(&cfg.Database.Password)},
 		{"OPENSLIDES_DB_HOST", storeString(&cfg.Database.Host)},
 		{"OPENSLIDES_DB_PORT", storeInt(&cfg.Database.Port)},
 		{"OPENSLIDES_RESTRICTER", storeString(&cfg.Restricter.URL)},

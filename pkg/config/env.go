@@ -7,43 +7,58 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
-// storeString returns a function to store a string.
-func storeString(dst *string) func(string) error {
-	return func(v string) error {
-		*dst = v
-		return nil
-	}
-}
-
-// storeInt returns a function to store an int.
-func storeInt(dst *int) func(string) error {
-	return func(v string) error {
-		x, err := strconv.Atoi(v)
-		if err == nil {
-			*dst = x
+// parseSecrets returns a function which in turn checks if
+// a given string starts with 'secret:'. If so the rest
+// of the string is used as a relative path to the path
+// given to the generating function.
+func parseSecrets(path *string) func(string) (string, error) {
+	const prefix = "secret:"
+	return func(s string) (string, error) {
+		if !strings.HasPrefix(s, prefix) {
+			return s, nil
 		}
-		return err
+		file := s[len(prefix):]
+		fname := filepath.Join(*path, file)
+		content, err := os.ReadFile(fname)
+		if err != nil {
+			return "", err
+		}
+		return string(content), nil
 	}
 }
 
-// storeDuration returns a function to store a duration.
-func storeDuration(dst *time.Duration) func(string) error {
-	return func(v string) error {
-		// If it can be parsed as an integer take that as seconds.
-		secs, err := strconv.Atoi(v)
-		if err == nil {
-			*dst = time.Second * time.Duration(secs)
+// noparse returns an unparsed string.
+func noparse(s string) (string, error) {
+	return s, nil
+}
+
+// parseDuration returns a time.Duration. If the
+// given string is an integer it is interpreted as seconds.
+func parseDuration(s string) (time.Duration, error) {
+	t, err := strconv.Atoi(s)
+	if err == nil {
+		return time.Duration(t) * time.Second, nil
+	}
+	return time.ParseDuration(s)
+}
+
+// store returns a function to parse a string to return a function to store a value.
+func store[T any](parse func(string) (T, error)) func(*T) func(string) error {
+	return func(dst *T) func(string) error {
+		return func(s string) error {
+			x, err := parse(s)
+			if err != nil {
+				return err
+			}
+			*dst = x
 			return nil
 		}
-		x, err := time.ParseDuration(v)
-		if err == nil {
-			*dst = x
-		}
-		return err
 	}
 }
 
