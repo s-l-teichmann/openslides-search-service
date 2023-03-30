@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+// Package main implements the generation of the filter used
+// for the searchable fields.
 package main
 
 import (
