@@ -25,9 +25,10 @@ import (
 )
 
 type controller struct {
-	cfg  *config.Config
-	auth *auth.Auth
-	qs   *search.QueryServer
+	cfg       *config.Config
+	auth      *auth.Auth
+	qs        *search.QueryServer
+	reqFields map[string][]string
 }
 
 /*
@@ -71,12 +72,24 @@ func (c *controller) search(w http.ResponseWriter, r *http.Request) {
 			}
 		*/
 
+		requestedFields := map[string][]string{}
+		for _, fqid := range answers {
+			collection, _, _ := strings.Cut(fqid, "/")
+			if _, ok := requestedFields[collection]; !ok {
+				if _, ok := c.reqFields[collection]; ok {
+					requestedFields[collection] = c.reqFields[collection]
+				}
+			}
+		}
+
 		requestBody := struct {
-			UserID int      `json:"user_id"`
-			FQIDs  []string `json:"fqids"`
+			UserID int                 `json:"user_id"`
+			FQIDs  []string            `json:"fqids"`
+			Fields map[string][]string `json:"fields"`
 		}{
 			UserID: userID,
 			FQIDs:  answers,
+			Fields: requestedFields,
 		}
 
 		body, err := json.Marshal(&requestBody)
@@ -246,12 +259,14 @@ func Run(
 	cfg *config.Config,
 	auth *auth.Auth,
 	qs *search.QueryServer,
+	reqFields map[string][]string,
 ) error {
 
 	c := controller{
-		cfg:  cfg,
-		auth: auth,
-		qs:   qs,
+		cfg:       cfg,
+		auth:      auth,
+		qs:        qs,
+		reqFields: reqFields,
 	}
 
 	mux := http.NewServeMux()
