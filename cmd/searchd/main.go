@@ -55,7 +55,6 @@ func run(cfg *config.Config) error {
 
 	// For text indexing we can only use string fields.
 	searchModels := models.Clone()
-	searchModels.Retain(meta.RetainStrings(false))
 
 	// If there are search filters configured cut search models further down.
 	if cfg.Models.Search != "" {
@@ -64,6 +63,8 @@ func run(cfg *config.Config) error {
 			return fmt.Errorf("loading search filters failed. %w", err)
 		}
 		searchModels.Retain(searchFilter.Retain(false))
+	} else {
+		searchModels.Retain(meta.RetainStrings(false))
 	}
 
 	db := search.NewDatabase(cfg)
@@ -89,7 +90,7 @@ func run(cfg *config.Config) error {
 
 	go authBackground(ctx, oserror.Handle)
 
-	return web.Run(ctx, cfg, authService, qs)
+	return web.Run(ctx, cfg, authService, qs, searchModels.CollectionRequestFields())
 }
 
 func main() {

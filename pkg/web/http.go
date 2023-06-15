@@ -25,9 +25,10 @@ import (
 )
 
 type controller struct {
-	cfg  *config.Config
-	auth *auth.Auth
-	qs   *search.QueryServer
+	cfg       *config.Config
+	auth      *auth.Auth
+	qs        *search.QueryServer
+	reqFields map[string][]string
 }
 
 /*
@@ -71,12 +72,24 @@ func (c *controller) search(w http.ResponseWriter, r *http.Request) {
 			}
 		*/
 
+		requestedFields := map[string][]string{}
+		for _, fqid := range answers {
+			collection, _, _ := strings.Cut(fqid, "/")
+			if _, ok := requestedFields[collection]; !ok {
+				if _, ok := c.reqFields[collection]; ok {
+					requestedFields[collection] = c.reqFields[collection]
+				}
+			}
+		}
+
 		requestBody := struct {
-			UserID int      `json:"user_id"`
-			FQIDs  []string `json:"fqids"`
+			UserID int                 `json:"user_id"`
+			FQIDs  []string            `json:"fqids"`
+			Fields map[string][]string `json:"fields"`
 		}{
 			UserID: userID,
 			FQIDs:  answers,
+			Fields: requestedFields,
 		}
 
 		body, err := json.Marshal(&requestBody)
@@ -101,8 +114,15 @@ func (c *controller) search(w http.ResponseWriter, r *http.Request) {
 		}
 		defer resp.Body.Close()
 		w.Header().Set("Content-Type", "application/json")
-		if _, err := io.Copy(w, resp.Body); err != nil {
-			log.Printf("error: copy restricter output failed: %v\n", err)
+
+		filteredResp, err := filterRestricterResponse(resp.Body)
+		if err != nil {
+			handleErrorWithStatus(w, err)
+			return
+		}
+
+		if _, err := w.Write(filteredResp); err != nil {
+			log.Printf("error: writing response failed: %v\n", err)
 		}
 		return
 	}
@@ -114,6 +134,33 @@ func (c *controller) search(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(answers); err != nil {
 		log.Printf("error: %v\n", err)
 	}
+}
+
+// removes restriced results from restricter response by checking
+// for id fields within the retured results
+func filterRestricterResponse(body io.ReadCloser) ([]byte, error) {
+	respBody, err := io.ReadAll(body)
+	if err != nil {
+		return nil, err
+	}
+
+	var restricterResponse map[string]map[string]any
+	if err := json.Unmarshal(respBody, &restricterResponse); err != nil {
+		return nil, err
+	}
+
+	for k, v := range restricterResponse {
+		if _, ok := v["id"]; !ok {
+			delete(restricterResponse, k)
+		}
+	}
+
+	filteredContent, err := json.Marshal(restricterResponse)
+	if err != nil {
+		return nil, err
+	}
+
+	return filteredContent, nil
 }
 
 func authMiddleware(next http.Handler, auth *auth.Auth) http.Handler {
@@ -212,18 +259,20 @@ func Run(
 	cfg *config.Config,
 	auth *auth.Auth,
 	qs *search.QueryServer,
+	reqFields map[string][]string,
 ) error {
 
 	c := controller{
-		cfg:  cfg,
-		auth: auth,
-		qs:   qs,
+		cfg:       cfg,
+		auth:      auth,
+		qs:        qs,
+		reqFields: reqFields,
 	}
 
 	mux := http.NewServeMux()
 
 	mux.Handle(
-		"/search",
+		"/system/search",
 		authMiddleware(http.HandlerFunc(c.search), auth))
 
 	addr := fmt.Sprintf("%s:%d", cfg.Web.Host, cfg.Web.Port)
